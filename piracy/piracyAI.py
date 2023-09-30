@@ -1,3 +1,6 @@
+# A python script to beat the C64 Piracy AI
+# It's not smart (has a poor static evaluation folder), but it sees far ahead
+
 import re
 from random import shuffle
 
@@ -17,6 +20,7 @@ ai_positions_considered = 0
 max_level = 0
 
 
+# Unlike the C64, can afford to make entire copies of the board during recursive exploration.abs
 def clone_board(board):
     return [row[:] for row in board]
 
@@ -61,12 +65,14 @@ def is_game_over(board):
 # The static evaluation function (aka heuristic evaluation function)
 # the value of the board at a given moment (with additional lookahead)
 # the higher the score, the better for the passed-in player
+# Note: this has no notion of board control at all, it's just using
+# pirate and non-blown hatch values, both of which are valued at 1 each.
+# Kinda weak, but good enough if there's sufficient look ahead.
+# Further below, code controls order in which moves are evaluated, which helps.
 def static_eval_func(board, player_to_max):
     return board_eval(board, player_to_max)[0]
 
 
-# TODO: this has no notion of board control, just pirate and non-blown hatch values.
-#       Kinda weak, but good enough if there's sufficient look ahead.
 def board_eval(board, player_to_max):
     score = 0  # positive is good for player_to_max
     left_pirate_count = 0
@@ -92,10 +98,10 @@ def board_eval(board, player_to_max):
                 score += -1 * gunport_value * player_to_max
 
     if right_pirate_count == 0:
-        score = 10000 * player_to_max  # value must be smaller than INF
+        score = 10000 * player_to_max  # win value must be smaller than INF
         game_over = True
     elif left_pirate_count == 0:
-        score = -10000 * player_to_max  # value must be larger than NEG_INF
+        score = -10000 * player_to_max  # lose value must be larger than NEG_INF
         game_over = True
 
     return (score, left_pirate_count, right_pirate_count, game_over)
@@ -103,9 +109,9 @@ def board_eval(board, player_to_max):
 
 def cannon_col_for_player(player):
     if player == LEFT_PLAYER:
-        return 0  # left cannons
+        return 0  # left cannons col
     else:
-        return 7  # right cannons
+        return 7  # right cannons col
 
 
 # launch one or more pirates from cannons into a new board state
@@ -119,7 +125,9 @@ def process_pirate_launch(board, player, rows_bitmap):
         if not use_cannon:
             continue
         new_state[row][cannon_col] -= player  # launch pirate
-        new_state[row][cannon_col + player] = player  # kill any pirate already there (friend or foe)
+        # kill any pirate already there (friend or foe)
+        new_state[row][cannon_col + player] = player 
+        
 
     return new_state
 
@@ -145,9 +153,10 @@ def process_pirate_move(board, player, r_delta):
                 opp_c = (new_c + player) % 8
                 if (new_state[r][opp_c] is not None and
                     abs(new_state[r][opp_c]) < 3):
-                    new_state[r][opp_c] += player  # reappear in opposite cannon hold (horz playfield wrap)
+                    new_state[r][opp_c] += player  # reappear in opposite hold (horz playfield wrap)
             else:
-                new_r = (r + r_delta) % 5  # remove pirate from current position, handle any vert playfield wrap
+                # remove pirate from current pos, handle any vert playfield wrap
+                new_r = (r + r_delta) % 5
                 if new_state[new_r][new_c] is not None:  # if not broken ropes
                     new_state[new_r][new_c] = player  # complete move
 
@@ -159,6 +168,7 @@ def cannon_can_launch(board, player, row):
     return board[row][cannon_col] is not None and board[row][cannon_col] != 0
 
 
+# Return True if the bitmap of cannons can launch pirates
 def cannons_can_launch(board, player, rows_bitmap):
     if rows_bitmap == 0:
         return False
@@ -166,7 +176,7 @@ def cannons_can_launch(board, player, rows_bitmap):
         if rows_bitmap & 1 > 0:
             if not cannon_can_launch(board, player, row):
                 return False
-        rows_bitmap >>= 1  
+        rows_bitmap >>= 1
     return True
 
 
@@ -183,7 +193,7 @@ def get_next_positions(board, player, describe_move = False):
                 new_state[5] = 'direction %s' % direction
             new_states.append(new_state)
 
-    # create 0 to 31 new states for cannon-launched pirates   
+    # create 0 to 31 new states for cannon-launched pirates
     options = []
     mask = 0
     for r in range(5):
@@ -194,7 +204,7 @@ def get_next_positions(board, player, describe_move = False):
     shuffle(options)
 
     # Created single cannon launch options up front, so they are more strongly
-    # selected when board outcomes look similar.  Now create the rest.      
+    # selected when board outcomes look similar.  Now create the rest.
     for r in range(3, 32):
         option = r & mask
         if option != 0 and option not in options:
@@ -241,7 +251,7 @@ def _minimax(curr_position, level, player_to_max, max_the_level, alpha, beta):
             if evaluation > max_val:
                 max_val = evaluation
                 max_position = child_pos
-            # alpha is the minimum score that the maximizing player is assured of    
+            # alpha is the minimum score that the maximizing player is assured of
             # alpha = max(alpha, evaluation)  # so-called "fail-soft" assignment order
             if PRUNING and max_val >= beta:
                 break  # prune tree search
@@ -255,7 +265,7 @@ def _minimax(curr_position, level, player_to_max, max_the_level, alpha, beta):
             if evaluation < min_val:
                 min_val = evaluation
                 min_position = child_pos
-            # beta is the maximum score that the minimizing player is assured of    
+            # beta is the maximum score that the minimizing player is assured of
             # beta = min(beta, evaluation)  # so-called "fail-soft" assignment order
             if PRUNING and min_val <= alpha:
                 break  # prune tree search
@@ -278,7 +288,7 @@ def main():
         [3,    0,    0,    0,    0,    0,    0,   -3],
         [3,    0, None,    0,    0, None,    0,   -3],
         [3,    0,    0,    0,    0,    0,    0,   -3],
-        ['']        
+        ['']
     ]
 
     lookahead_levels = 6
@@ -292,7 +302,7 @@ def main():
     # the 1st move, and the C64 is the RIGHT_PLAYER.  User enters C64 moves into
     # this code, and enters python moves into C64.
     # This could be generalized of course (i.e., python on right, or python vs python).
-    while(not is_game_over(board)):
+    while not is_game_over(board):
         ai_positions_considered = 0
         score, board = minimax(board, lookahead_levels, player_to_max)
         print("Python's move: %s" % board[5])
@@ -305,7 +315,7 @@ def main():
             break
 
         bad_input = True
-        while(bad_input):
+        while bad_input:
             c64_move = input("Enter C64's move >")
             c64_move = c64_move.strip().lower()
             # process undo (for if/when I enter a C64 move incorrectly)
